@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "erasableSyntaxOnly": true,
+        "esModuleInterop": true,
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "outDir": "dist",
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "ES2021"
+    },
+    "include": [
+        "src"
+    ]
+}
