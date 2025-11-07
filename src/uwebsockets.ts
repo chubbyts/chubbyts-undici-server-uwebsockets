@@ -85,7 +85,7 @@ export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciRespon
 
     if (!undiciResponse.body) {
       uWebSocketsResponse.cork(() => {
-        uWebSocketsResponse.endWithoutBody();
+        uWebSocketsResponse.end();
       });
 
       return;

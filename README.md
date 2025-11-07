@@ -32,7 +32,7 @@ Use @chubbyts/chubbyts-undici-server on uwebsockets.
 Through [NPM](https://www.npmjs.com) as [@chubbyts/chubbyts-undici-server-uwebsockets][1].
 
 ```sh
-npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.0.0
+npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.0.1
 ```
 
 ## Usage
@@ -50,7 +50,7 @@ import {
 const serverHost = process.env.SERVER_HOST as string;
 const serverPort = parseInt(process.env.SERVER_PORT as string);
 
-const nodeRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
 
 // for example @chubbyts/chubbyts-framework app (which implements Handler)
 const handler: Handler = async (serverRequest: ServerRequest<{name: string}>): Promise<Response> => {

@@ -228,7 +228,7 @@ describe('uwebsockets', () => {
         cork: (callback) => {
           callback();
         },
-        endWithoutBody: () => {
+        end: () => {
           end = true;
         },
         writeStatus: (_status: string) => {
