@@ -24,8 +24,8 @@ Use @chubbyts/chubbyts-undici-server on uwebsockets.
 ## Requirements
 
  * node: 20
- * [@chubbyts/chubbyts-undici-server][2]: ^1.0.1
- * [uWebSockets.js][3]: github:uNetworking/uWebSockets.js#v20.56.0
+ * [@chubbyts/chubbyts-undici-server][2]: ^1.0.3
+ * [uWebSockets.js][3]: github:uNetworking/uWebSockets.js#v20.60.0
 
 ## Installation
 

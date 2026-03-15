@@ -42,7 +42,7 @@ const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: s
       // eslint-disable-next-line functional/no-let
       let end;
       // eslint-disable-next-line functional/no-let
-      let isLast = false;
+      let isLast;
 
       while (true) {
         end = start + Math.ceil(Math.random() * (bodyLength - start));
