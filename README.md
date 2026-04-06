@@ -24,15 +24,15 @@ Use @chubbyts/chubbyts-undici-server on uwebsockets.
 ## Requirements
 
  * node: 20
- * [@chubbyts/chubbyts-undici-server][2]: ^1.0.3
- * [uWebSockets.js][3]: github:uNetworking/uWebSockets.js#v20.60.0
+ * [@chubbyts/chubbyts-undici-server][2]: ^1.1.0
+ * [uWebSockets.js][3]: github:uNetworking/uWebSockets.js#v20.61.0
 
 ## Installation
 
 Through [NPM](https://www.npmjs.com) as [@chubbyts/chubbyts-undici-server-uwebsockets][1].
 
 ```sh
-npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.0.1
+npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.1.0
 ```
 
 ## Usage

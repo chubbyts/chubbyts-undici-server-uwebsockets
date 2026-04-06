@@ -15,10 +15,16 @@ export const getUrl = (uWebSocketsRequest: HttpRequest, baseUrl: string | undefi
   return `http://127.0.0.1${pathAndQuery}`;
 };
 
-type UWebSocketsRequestToUndiciRequestFactory = (
-  uWebSocketsRequest: HttpRequest,
-  uWebSocketsResponse: HttpResponse,
-) => ServerRequest;
+const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest): Array<[string, string]> => {
+  const headers: Array<[string, string]> = [];
+
+  uWebSocketsRequest.forEach((name, value) => {
+    // eslint-disable-next-line functional/immutable-data
+    headers.push([name, value]);
+  });
+
+  return headers;
+};
 
 const getBody = (res: HttpResponse): ReadableStream => {
   const passthrough = new PassThrough();
@@ -34,17 +40,17 @@ const getBody = (res: HttpResponse): ReadableStream => {
   return Readable.toWeb(passthrough);
 };
 
+type UWebSocketsRequestToUndiciRequestFactory = (
+  uWebSocketsRequest: HttpRequest,
+  uWebSocketsResponse: HttpResponse,
+) => ServerRequest;
+
 export const createUWebSocketsRequestToUndiciRequestFactory = (
   baseUrl: string | undefined = undefined,
 ): UWebSocketsRequestToUndiciRequestFactory => {
   return (uWebSocketsRequest: HttpRequest, uWebSocketsResponse: HttpResponse): ServerRequest => {
     const method = uWebSocketsRequest.getMethod().toUpperCase();
-
-    const headers = new Headers();
-
-    uWebSocketsRequest.forEach((name, value) => {
-      headers.append(name, value);
-    });
+    const headers = uWebSocketsRequestToUndiciHeadersInit(uWebSocketsRequest);
 
     const hasBody = method !== 'GET' && method !== 'HEAD';
     const body = hasBody ? getBody(uWebSocketsResponse) : null;
@@ -65,6 +71,24 @@ export const createUWebSocketsRequestToUndiciRequestFactory = (
   };
 };
 
+const undiciResponseToUWebSocketsHeaders = (undiciResponse: Response): Array<[string, string]> => {
+  const headers: Array<[string, string]> = [];
+
+  for (const [name, value] of undiciResponse.headers.entries()) {
+    if (name !== 'set-cookie') {
+      // eslint-disable-next-line functional/immutable-data
+      headers.push([name, value]);
+    }
+  }
+
+  for (const value of undiciResponse.headers.getSetCookie()) {
+    // eslint-disable-next-line functional/immutable-data
+    headers.push(['set-cookie', value]);
+  }
+
+  return headers;
+};
+
 type UndiciResponseToUWebSocketsResponseEmitter = (undiciResponse: Response, uWebSocketsResponse: HttpResponse) => void;
 
 export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciResponseToUWebSocketsResponseEmitter => {
@@ -72,14 +96,8 @@ export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciRespon
     uWebSocketsResponse.cork(() => {
       uWebSocketsResponse.writeStatus(`${undiciResponse.status} ${undiciResponse.statusText}`);
 
-      Array.from(undiciResponse.headers.entries())
-        .filter(([name]) => name.toLowerCase() !== 'set-cookie')
-        .forEach(([name, value]) => {
-          uWebSocketsResponse.writeHeader(name, value);
-        });
-
-      undiciResponse.headers.getSetCookie().forEach((value) => {
-        uWebSocketsResponse.writeHeader('set-cookie', value);
+      undiciResponseToUWebSocketsHeaders(undiciResponse).forEach(([name, value]) => {
+        uWebSocketsResponse.writeHeader(name, value);
       });
     });
 
