@@ -1,14 +1,14 @@
 {
   "name": "@chubbyts/chubbyts-undici-server-uwebsockets",
   "type": "module",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Use @chubbyts/chubbyts-undici-server on uwebsockets.",
   "keywords": [],
   "author": "Dominik Zogg",
   "license": "MIT",
   "repository": "chubbyts/chubbyts-undici-server-uwebsockets",
   "scripts": {
-    "build": "tsc",
+    "build": "rm -Rf dist && tsc",
     "cs-fix": "prettier --write src tests",
     "cs": "prettier --check src tests",
     "infection": "stryker run",
@@ -38,11 +38,11 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@chubbyts/chubbyts-undici-server": "^1.1.1",
+    "@chubbyts/chubbyts-undici-server": "^1.1.2",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.64.0"
   },
   "devDependencies": {
-    "@chubbyts/chubbyts-eslint": "^5.1.0",
+    "@chubbyts/chubbyts-eslint": "^5.1.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^25.6.0",
