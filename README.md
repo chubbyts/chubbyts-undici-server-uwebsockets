@@ -32,7 +32,7 @@ Use @chubbyts/chubbyts-undici-server on uwebsockets.
 Through [NPM](https://www.npmjs.com) as [@chubbyts/chubbyts-undici-server-uwebsockets][1].
 
 ```sh
-npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.1.3
+npm i @chubbyts/chubbyts-undici-server-uwebsockets@^1.2.0
 ```
 
 ## Usage
