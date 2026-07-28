@@ -28,6 +28,22 @@ const mockUWebSocketsRequest = ({
   } as HttpRequest;
 };
 
+const makeErroringWebStream = (): ReadableStream<Uint8Array> => {
+  // oxlint-disable-next-line functional/no-let
+  let sent = false;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('hello'));
+      setTimeout(() => {
+        if (!sent) {
+          sent = true;
+          controller.error(new Error('boom'));
+        }
+      }, 1);
+    },
+  });
+};
+
 const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: string; abort?: boolean }) => {
   return {
     onData: (callback) => {
@@ -37,11 +53,11 @@ const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: s
 
       const bodyLength = body.length;
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let start = 0;
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let end;
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let isLast;
 
       while (true) {
@@ -215,13 +231,13 @@ describe('uwebsockets', () => {
         ],
       });
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let status;
 
-      // eslint-disable-next-line functional/no-let, prefer-const
+      // oxlint-disable-next-line functional/no-let, prefer-const
       let headers: Array<[string, string]> = [];
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let end = false;
 
       const uWebSocketsResponse = {
@@ -235,7 +251,7 @@ describe('uwebsockets', () => {
           status = _status;
         },
         writeHeader: (key: string, value: string) => {
-          // eslint-disable-next-line functional/immutable-data
+          // oxlint-disable-next-line functional/immutable-data
           headers.push([key, value]);
         },
       } as HttpResponse;
@@ -272,16 +288,16 @@ describe('uwebsockets', () => {
         headers: [['content-type', 'json']],
       });
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let status;
 
-      // eslint-disable-next-line functional/no-let, prefer-const
+      // oxlint-disable-next-line functional/no-let, prefer-const
       let headers: Array<[string, string]> = [];
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let end = false;
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let body = '';
 
       const uWebSocketsResponse = {
@@ -295,7 +311,7 @@ describe('uwebsockets', () => {
           status = _status;
         },
         writeHeader: (key: string, value: string) => {
-          // eslint-disable-next-line functional/immutable-data
+          // oxlint-disable-next-line functional/immutable-data
           headers.push([key, value]);
         },
         write: (content) => {
@@ -328,38 +344,22 @@ describe('uwebsockets', () => {
     });
 
     test('with body containing an error', async () => {
-      const makeErroringWebStream = (): ReadableStream<Uint8Array> => {
-        // eslint-disable-next-line functional/no-let
-        let sent = false;
-        return new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode('hello'));
-            setTimeout(() => {
-              if (!sent) {
-                sent = true;
-                controller.error(new Error('boom'));
-              }
-            }, 1);
-          },
-        });
-      };
-
       const undiciResponse = new Response(makeErroringWebStream(), {
         status: 200,
         statusText: 'OK',
         headers: [['content-type', 'json']],
       });
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let status;
 
-      // eslint-disable-next-line functional/no-let, prefer-const
+      // oxlint-disable-next-line functional/no-let, prefer-const
       let headers: Array<[string, string]> = [];
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let end = false;
 
-      // eslint-disable-next-line functional/no-let
+      // oxlint-disable-next-line functional/no-let
       let body = '';
 
       const uWebSocketsResponse = {
@@ -373,7 +373,7 @@ describe('uwebsockets', () => {
           status = _status;
         },
         writeHeader: (key: string, value: string) => {
-          // eslint-disable-next-line functional/immutable-data
+          // oxlint-disable-next-line functional/immutable-data
           headers.push([key, value]);
         },
         write: (content) => {

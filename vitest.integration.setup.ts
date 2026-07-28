@@ -1,4 +1,4 @@
-/* eslint-disable functional/no-let */
+/* oxlint-disable functional/no-let */
 
 import type { ChildProcessWithoutNullStreams } from 'child_process';
 import { spawn } from 'child_process';
@@ -50,7 +50,7 @@ let httpServer: ChildProcessWithoutNullStreams;
 export const setup = async () => {
   httpServer = await startServer();
 
-  // eslint-disable-next-line functional/immutable-data
+  // oxlint-disable-next-line functional/immutable-data
   process.env.HTTP_URI = `http://${testServerHost}:${testServerPort}`;
 };
 

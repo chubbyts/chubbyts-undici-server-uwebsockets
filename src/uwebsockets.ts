@@ -19,7 +19,7 @@ const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest):
   const headers: Array<[string, string]> = [];
 
   uWebSocketsRequest.forEach((name, value) => {
-    // eslint-disable-next-line functional/immutable-data
+    // oxlint-disable-next-line functional/immutable-data
     headers.push([name, value]);
   });
 
@@ -76,13 +76,13 @@ const undiciResponseToUWebSocketsHeaders = (undiciResponse: Response): Array<[st
 
   for (const [name, value] of undiciResponse.headers.entries()) {
     if (name !== 'set-cookie') {
-      // eslint-disable-next-line functional/immutable-data
+      // oxlint-disable-next-line functional/immutable-data
       headers.push([name, value]);
     }
   }
 
   for (const value of undiciResponse.headers.getSetCookie()) {
-    // eslint-disable-next-line functional/immutable-data
+    // oxlint-disable-next-line functional/immutable-data
     headers.push(['set-cookie', value]);
   }
 
