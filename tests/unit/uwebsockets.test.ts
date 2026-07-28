@@ -154,6 +154,36 @@ describe('uwebsockets', () => {
       expect(await serverRequest.text()).toBe('');
     });
 
+    test('head', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'head',
+        url: '/path/to/endpoint',
+        query: 'key=value',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      expect(serverRequest.method).toBe('HEAD');
+      expect(serverRequest.url).toBe('https://example.com/path/to/endpoint?key=value');
+      expect(Object.fromEntries(serverRequest.headers.entries())).toMatchInlineSnapshot(`
+        {
+          "accept": "application/json",
+        }
+      `);
+
+      expect(serverRequest.signal.aborted).toBe(false);
+
+      expect(serverRequest.body).toBeNull();
+    });
+
     test('post', async () => {
       const uWebSocketsRequest = mockUWebSocketsRequest({
         method: 'post',
