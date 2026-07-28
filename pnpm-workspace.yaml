@@ -1,3 +1,7 @@
 allowBuilds:
   esbuild: true
   unrs-resolver: true
+packageExtensions:
+  '@stryker-mutator/core':
+    dependencies:
+      typescript: ^6.0.3
