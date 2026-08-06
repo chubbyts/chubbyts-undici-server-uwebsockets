@@ -51,7 +51,7 @@ const serverHost = process.env.SERVER_HOST as string;
 const serverPort = parseInt(process.env.SERVER_PORT as string);
 
 // second argument (optional): the request body must be fully received within 30s
-const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com', 30_000);
+const uWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com', 30_000);
 
 // for example @chubbyts/chubbyts-framework app (which implements Handler)
 const handler: Handler = async (serverRequest: ServerRequest<{name: string}>): Promise<Response> => {
@@ -67,7 +67,27 @@ const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSoc
 
 App()
   .any('/*', async (res: HttpResponse, req: HttpRequest) => {
-    undiciResponseToUWebSocketsResponseEmitter(await handler(uUWebSocketsRequestToUndiciRequestFactory(req, res)), res);
+    let serverRequest: ServerRequest | undefined = undefined;
+
+    try {
+      serverRequest = uWebSocketsRequestToUndiciRequestFactory(req, res);
+      const response = await handler(serverRequest);
+      undiciResponseToUWebSocketsResponseEmitter(response, res);
+    } catch (error) {
+      console.error(`Failed to handle request: ${error}`);
+
+      // uWebSockets.js forbids touching an aborted response: if the client is already gone
+      // there is nothing left to send the error response to
+      if (serverRequest?.signal.aborted) {
+        return;
+      }
+
+      res.cork(() => {
+        res.writeStatus('500 Internal Server Error');
+        res.writeHeader('content-type', 'text/plain');
+        res.end('Internal Server Error');
+      });
+    }
   })
   .listen(serverHost, serverPort, (listenSocket: unknown) => {
     if (listenSocket) {

@@ -10,12 +10,16 @@ import {
 const serverHost = process.env.SERVER_HOST as string;
 const serverPort = parseInt(process.env.SERVER_PORT as string);
 
-const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
+const uWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
   'https://example.com',
   30_000,
 );
 
 const handler: Handler = async (serverRequest: ServerRequest): Promise<Response> => {
+  if (new URL(serverRequest.url).pathname === '/path/to/error/route') {
+    throw new Error('Handler failure');
+  }
+
   const headers = Object.fromEntries(serverRequest.headers.entries());
 
   const { host: _, ...otherHeaders } = headers;
@@ -39,7 +43,28 @@ const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSoc
 
 App()
   .any('/*', async (res: HttpResponse, req: HttpRequest) => {
-    undiciResponseToUWebSocketsResponseEmitter(await handler(uUWebSocketsRequestToUndiciRequestFactory(req, res)), res);
+    // oxlint-disable-next-line functional/no-let
+    let serverRequest: ServerRequest | undefined = undefined;
+
+    try {
+      serverRequest = uWebSocketsRequestToUndiciRequestFactory(req, res);
+      const response = await handler(serverRequest);
+      undiciResponseToUWebSocketsResponseEmitter(response, res);
+    } catch (error) {
+      console.error(`Failed to handle request: ${error}`);
+
+      // uWebSockets.js forbids touching an aborted response: if the client is already gone
+      // there is nothing left to send the error response to
+      if (serverRequest?.signal.aborted) {
+        return;
+      }
+
+      res.cork(() => {
+        res.writeStatus('500 Internal Server Error');
+        res.writeHeader('content-type', 'text/plain');
+        res.end('Internal Server Error');
+      });
+    }
   })
   .listen(serverHost, serverPort, (listenSocket: unknown) => {
     if (listenSocket) {

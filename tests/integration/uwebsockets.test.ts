@@ -23,6 +23,15 @@ test('get', async () => {
   `);
 });
 
+test('handler error', async () => {
+  const response = await fetch(`${process.env.HTTP_URI}/path/to/error/route`);
+
+  expect(response.status).toBe(500);
+  expect(response.headers.get('content-type')).toBe('text/plain');
+
+  expect(await response.text()).toBe('Internal Server Error');
+});
+
 test('post', async () => {
   const response = await fetch(`${process.env.HTTP_URI}/path/to/post/route`, {
     method: 'POST',
