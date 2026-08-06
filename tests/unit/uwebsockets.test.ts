@@ -543,6 +543,101 @@ describe('uwebsockets', () => {
       expect(uWebSocketsResponse.closed).toBe(false);
     });
 
+    test('with multiple cookie headers', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [
+          ['cookie', 'sessionId=abc123'],
+          ['cookie', 'ui_lang=en-US'],
+        ],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      expect([...serverRequest.headers.entries()]).toMatchInlineSnapshot(`
+        [
+          [
+            "cookie",
+            "sessionId=abc123; ui_lang=en-US",
+          ],
+        ]
+      `);
+    });
+
+    test('with single authorization header', () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['authorization', 'Bearer token1']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      expect([...serverRequest.headers.entries()]).toMatchInlineSnapshot(`
+        [
+          [
+            "authorization",
+            "Bearer token1",
+          ],
+        ]
+      `);
+    });
+
+    test('with multiple authorization headers', () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [
+          ['authorization', 'Bearer token1'],
+          ['authorization', 'Bearer token2'],
+        ],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      expect(() => uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse)).toThrow(
+        'Request contains multiple "authorization" headers',
+      );
+    });
+
+    test('with multiple proxy-authorization headers', () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [
+          ['proxy-authorization', 'Basic dXNlcjE='],
+          ['proxy-authorization', 'Basic dXNlcjI='],
+        ],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      expect(() => uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse)).toThrow(
+        'Request contains multiple "proxy-authorization" headers',
+      );
+    });
+
     test('with absolute-form request target', () => {
       const uWebSocketsRequest = mockUWebSocketsRequest({
         method: 'get',

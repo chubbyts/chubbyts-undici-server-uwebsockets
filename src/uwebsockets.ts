@@ -4,6 +4,10 @@ import type { HttpRequest, HttpResponse } from 'uWebSockets.js';
 import type { Response } from '@chubbyts/chubbyts-undici-server/dist/server';
 import { ServerRequest } from '@chubbyts/chubbyts-undici-server/dist/server';
 
+// credentials are singleton fields (RFC 9110 5.5): duplicates cannot be combined, undici's
+// Headers would join them with ', ' which confuses downstream auth parsing
+const singletonHeaderNames = new Set(['authorization', 'proxy-authorization']);
+
 type AbortState = { aborted: boolean; listeners: Array<() => void> };
 
 const abortStates = new WeakMap<HttpResponse, AbortState>();
@@ -73,8 +77,19 @@ export const getUrl = (uWebSocketsRequest: HttpRequest, baseUrl: string | undefi
 
 const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest): Array<[string, string]> => {
   const headers: Array<[string, string]> = [];
+  const seenSingletonHeaderNames = new Set<string>();
 
   uWebSocketsRequest.forEach((name, value) => {
+    if (singletonHeaderNames.has(name)) {
+      if (seenSingletonHeaderNames.has(name)) {
+        throw new Error(`Request contains multiple "${name}" headers`);
+      }
+
+      seenSingletonHeaderNames.add(name);
+    }
+
+    // duplicate cookie headers need no special handling: undici's Headers combines them with
+    // the cookie-specific '; ' separator (fetch spec 5.5 "combine") instead of the default ', '
     // oxlint-disable-next-line functional/immutable-data
     headers.push([name, value]);
   });
