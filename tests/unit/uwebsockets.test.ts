@@ -444,6 +444,105 @@ describe('uwebsockets', () => {
       await expect(serverRequest.text()).rejects.toThrow('Request has been aborted');
     });
 
+    test('post, with request body timeout, with stalling request stream', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'post',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ stallBody: true });
+
+      const uWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
+        'https://example.com',
+        50,
+      );
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      await expect(serverRequest.text()).rejects.toThrow('Request body has not been fully received within 50ms');
+
+      expect(uWebSocketsResponse.closed).toBe(true);
+    });
+
+    test('post, with request body timeout, with body received in time', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'post',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ body: 'complete' });
+
+      const uWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
+        'https://example.com',
+        100,
+      );
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      await expect(serverRequest.text()).resolves.toBe('complete');
+
+      // the body has been fully received: the timeout got cleared and must not close the connection
+      await wait(150);
+
+      expect(uWebSocketsResponse.closed).toBe(false);
+    });
+
+    test('post, with request body timeout, with abort before the timeout', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'post',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ stallBody: true });
+
+      const uWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
+        'https://example.com',
+        50,
+      );
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      uWebSocketsResponse.triggerAbort();
+
+      await expect(serverRequest.text()).rejects.toThrow('Request has been aborted');
+
+      // the connection is already gone: the timeout must not close the aborted response
+      await wait(100);
+
+      expect(uWebSocketsResponse.closed).toBe(false);
+    });
+
+    test('post, without request body timeout, with slowly received body', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'post',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ stallBody: true });
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      await wait(30);
+
+      uWebSocketsResponse.triggerData('delayed', true);
+
+      // no request body timeout is configured: a slow body must not lead to a destroyed request
+      await expect(serverRequest.text()).resolves.toBe('delayed');
+
+      expect(uWebSocketsResponse.closed).toBe(false);
+    });
+
     test('with absolute-form request target', () => {
       const uWebSocketsRequest = mockUWebSocketsRequest({
         method: 'get',
@@ -673,6 +772,26 @@ describe('uwebsockets', () => {
       expect((cancelReason as Error).message).toBe('Response has been aborted');
     });
 
+    test('with body, with response send timeout, with stalling response body stream', async () => {
+      const undiciResponse = new Response(makeStallingWebStream(), {
+        status: 200,
+        statusText: 'OK',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter(50);
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      await wait(100);
+
+      expect(uWebSocketsResponse.chunks.join('')).toBe('partial');
+      expect(uWebSocketsResponse.ended).toBe(false);
+      expect(uWebSocketsResponse.closed).toBe(true);
+    });
+
     test('with body, with abort, with request factory sharing the same response', async () => {
       const uWebSocketsRequest = mockUWebSocketsRequest({
         method: 'get',
@@ -710,6 +829,30 @@ describe('uwebsockets', () => {
       // (abort signal) and the response emitter (stopped streaming)
       expect(serverRequest.signal.aborted).toBe(true);
       expect(uWebSocketsResponse.ended).toBe(false);
+      expect(uWebSocketsResponse.closed).toBe(false);
+    });
+
+    test('with body, with response send timeout, with body sent in time', async () => {
+      const undiciResponse = new Response(JSON.stringify({ name: 'test' }), {
+        status: 200,
+        statusText: 'OK',
+        headers: [['content-type', 'json']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter(100);
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      await wait(10);
+
+      expect(uWebSocketsResponse.ended).toBe(true);
+      expect(uWebSocketsResponse.chunks.join('')).toMatchInlineSnapshot('"{"name":"test"}"');
+
+      // the response has been fully sent: the timeout got cleared and must not close the connection
+      await wait(150);
+
       expect(uWebSocketsResponse.closed).toBe(false);
     });
   });

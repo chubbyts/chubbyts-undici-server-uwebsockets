@@ -82,7 +82,11 @@ const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest):
   return headers;
 };
 
-const getBody = (uWebSocketsResponse: HttpResponse, abortState: AbortState): ReadableStream => {
+const getBody = (
+  uWebSocketsResponse: HttpResponse,
+  abortState: AbortState,
+  requestBodyTimeoutMs: number | undefined,
+): ReadableStream => {
   const passthrough = new PassThrough();
 
   // a disconnecting client would otherwise leave the passthrough open forever: a pending
@@ -91,10 +95,26 @@ const getBody = (uWebSocketsResponse: HttpResponse, abortState: AbortState): Rea
     passthrough.destroy(new Error('Request has been aborted'));
   });
 
+  // slowloris protection: a client sending the body arbitrarily slow would otherwise keep the
+  // request (and its socket) alive forever, the error reaches the handler via the web stream
+  const timeout =
+    requestBodyTimeoutMs !== undefined
+      ? setTimeout(() => {
+          passthrough.destroy(new Error(`Request body has not been fully received within ${requestBodyTimeoutMs}ms`));
+
+          if (!abortState.aborted) {
+            uWebSocketsResponse.close();
+          }
+        }, requestBodyTimeoutMs)
+      : undefined;
+
+  timeout?.unref();
+
   uWebSocketsResponse.onData((chunk: ArrayBuffer, isLast: boolean) => {
     passthrough.write(Buffer.from(new Uint8Array(chunk)));
 
     if (isLast) {
+      clearTimeout(timeout);
       passthrough.end();
     }
   });
@@ -109,6 +129,7 @@ type UWebSocketsRequestToUndiciRequestFactory = (
 
 export const createUWebSocketsRequestToUndiciRequestFactory = (
   baseUrl: string | undefined = undefined,
+  requestBodyTimeoutMs: number | undefined = undefined,
 ): UWebSocketsRequestToUndiciRequestFactory => {
   return (uWebSocketsRequest: HttpRequest, uWebSocketsResponse: HttpResponse): ServerRequest => {
     const method = uWebSocketsRequest.getMethod().toUpperCase();
@@ -134,7 +155,7 @@ export const createUWebSocketsRequestToUndiciRequestFactory = (
     return new ServerRequest(url, {
       method,
       headers,
-      body: getBody(uWebSocketsResponse, abortState),
+      body: getBody(uWebSocketsResponse, abortState, requestBodyTimeoutMs),
       duplex: 'half',
       signal: abortController.signal,
     });
@@ -161,7 +182,9 @@ const undiciResponseToUWebSocketsHeaders = (undiciResponse: Response): Array<[st
 
 type UndiciResponseToUWebSocketsResponseEmitter = (undiciResponse: Response, uWebSocketsResponse: HttpResponse) => void;
 
-export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciResponseToUWebSocketsResponseEmitter => {
+export const createUndiciResponseToUWebSocketsResponseEmitter = (
+  responseSendTimeoutMs: number | undefined = undefined,
+): UndiciResponseToUWebSocketsResponseEmitter => {
   return (undiciResponse: Response, uWebSocketsResponse: HttpResponse): void => {
     const abortState = getAbortState(uWebSocketsResponse);
 
@@ -204,6 +227,20 @@ export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciRespon
     addAbortListener(abortState, () => {
       body.destroy(new Error('Response has been aborted'));
     });
+
+    // slowloris protection: a client reading the response arbitrarily slow (or a stalling
+    // response body stream) would otherwise keep the response (and its socket) alive forever;
+    // close() triggers the abort listener above which destroys the body stream
+    const timeout =
+      responseSendTimeoutMs !== undefined
+        ? setTimeout(() => {
+            uWebSocketsResponse.close();
+          }, responseSendTimeoutMs)
+        : undefined;
+
+    timeout?.unref();
+
+    body.on('close', () => clearTimeout(timeout));
 
     body.on('data', (data: Buffer) => {
       uWebSocketsResponse.cork(() => {

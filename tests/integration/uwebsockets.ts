@@ -10,7 +10,10 @@ import {
 const serverHost = process.env.SERVER_HOST as string;
 const serverPort = parseInt(process.env.SERVER_PORT as string);
 
-const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory(
+  'https://example.com',
+  30_000,
+);
 
 const handler: Handler = async (serverRequest: ServerRequest): Promise<Response> => {
   const headers = Object.fromEntries(serverRequest.headers.entries());
@@ -32,7 +35,7 @@ const handler: Handler = async (serverRequest: ServerRequest): Promise<Response>
   );
 };
 
-const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter(60_000);
 
 App()
   .any('/*', async (res: HttpResponse, req: HttpRequest) => {

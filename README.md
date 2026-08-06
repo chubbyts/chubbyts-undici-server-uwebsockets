@@ -50,7 +50,8 @@ import {
 const serverHost = process.env.SERVER_HOST as string;
 const serverPort = parseInt(process.env.SERVER_PORT as string);
 
-const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+// second argument (optional): the request body must be fully received within 30s
+const uUWebSocketsRequestToUndiciRequestFactory = createUWebSocketsRequestToUndiciRequestFactory('https://example.com', 30_000);
 
 // for example @chubbyts/chubbyts-framework app (which implements Handler)
 const handler: Handler = async (serverRequest: ServerRequest<{name: string}>): Promise<Response> => {
@@ -61,7 +62,8 @@ const handler: Handler = async (serverRequest: ServerRequest<{name: string}>): P
   });
 };
 
-const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+// argument (optional): the response must be fully sent within 60s
+const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter(60_000);
 
 App()
   .any('/*', async (res: HttpResponse, req: HttpRequest) => {
@@ -73,6 +75,19 @@ App()
     }
   });
 ```
+
+### Timeouts
+
+Slow clients (slowloris) can otherwise tie up sockets indefinitely:
+
+ * `createUWebSocketsRequestToUndiciRequestFactory(baseUrl, requestBodyTimeoutMs)`: if the request body has not
+   been fully received within the given time, the connection gets closed and the error surfaces to the handler
+   through the request body stream.
+ * `createUndiciResponseToUWebSocketsResponseEmitter(responseSendTimeoutMs)`: if the response has not been fully
+   sent within the given time (slow reading client or stalling response body stream), the connection gets closed.
+
+Both timeouts are optional and disabled by default. They only cover the body phases handled by this adapter,
+slow header senders are covered by the idle timeout uWebSockets.js applies to HTTP connections itself.
 
 ## Copyright
 
