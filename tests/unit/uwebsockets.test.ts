@@ -212,6 +212,94 @@ describe('uwebsockets', () => {
         '"https://example.com/path/to/endpoint?key=value"',
       );
     });
+
+    test('with base url, with trailing slash', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(getUrl(uWebSocketsRequest, 'https://example.com/')).toMatchInlineSnapshot(
+        '"https://example.com/path/to/endpoint"',
+      );
+    });
+
+    test('with base url, with path prefix', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(getUrl(uWebSocketsRequest, 'https://example.com/app')).toMatchInlineSnapshot(
+        '"https://example.com/app/path/to/endpoint"',
+      );
+    });
+
+    test('with base url, with path prefix, with trailing slash', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(getUrl(uWebSocketsRequest, 'https://example.com/app/')).toMatchInlineSnapshot(
+        '"https://example.com/app/path/to/endpoint"',
+      );
+    });
+
+    test('with base url, with protocol-relative request target', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '//evil.com/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(() => getUrl(uWebSocketsRequest, 'https://example.com')).toThrow(
+        'Request target "//evil.com/path/to/endpoint" resolves to origin "https://evil.com" instead of the expected origin "https://example.com"',
+      );
+    });
+
+    test('with base url, with backslash protocol-relative request target', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '/\\evil.com/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(() => getUrl(uWebSocketsRequest, 'https://example.com')).toThrow(
+        'Request target "/\\evil.com/path/to/endpoint" resolves to origin "https://evil.com" instead of the expected origin "https://example.com"',
+      );
+    });
+
+    test('with base url, with absolute-form request target', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => 'http://evil.com/path/to/endpoint',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(() => getUrl(uWebSocketsRequest, 'https://example.com')).toThrow(
+        'Unsupported request target "http://evil.com/path/to/endpoint": only origin-form (starting with "/") is supported',
+      );
+    });
+
+    test('without base url, with authority-form request target', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => 'evil.com:443',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(() => getUrl(uWebSocketsRequest)).toThrow(
+        'Unsupported request target "evil.com:443": only origin-form (starting with "/") is supported',
+      );
+    });
+
+    test('without base url, with asterisk-form request target', () => {
+      const uWebSocketsRequest = {
+        getUrl: () => '*',
+        getQuery: () => '',
+      } as HttpRequest;
+
+      expect(() => getUrl(uWebSocketsRequest)).toThrow(
+        'Unsupported request target "*": only origin-form (starting with "/") is supported',
+      );
+    });
   });
 
   describe('createUWebSocketsRequestToUndiciRequestFactory', () => {
@@ -354,6 +442,24 @@ describe('uwebsockets', () => {
       expect(serverRequest.signal.aborted).toBe(true);
 
       await expect(serverRequest.text()).rejects.toThrow('Request has been aborted');
+    });
+
+    test('with absolute-form request target', () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: 'http://evil.com/path/to/endpoint',
+        query: '',
+        headers: [],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      expect(() => uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse)).toThrow(
+        'Unsupported request target "http://evil.com/path/to/endpoint": only origin-form (starting with "/") is supported',
+      );
     });
   });
 

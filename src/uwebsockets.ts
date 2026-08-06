@@ -42,15 +42,33 @@ const addAbortListener = (state: AbortState, listener: () => void): void => {
   state.listeners.push(listener);
 };
 
+const resolveUrl = (pathAndQuery: string, base: string): string => {
+  const parsedBase = new URL(base);
+  const url = new URL(parsedBase.pathname.replace(/\/$/, '') + pathAndQuery, parsedBase.origin);
+
+  // protocol-relative ('//evil.com/path') and backslash ('/\evil.com/path') targets resolve
+  // to a different host than the base url and must not be trusted
+  if (url.origin !== parsedBase.origin) {
+    throw new Error(
+      `Request target "${pathAndQuery}" resolves to origin "${url.origin}" instead of the expected origin "${parsedBase.origin}"`,
+    );
+  }
+
+  return url.toString();
+};
+
 export const getUrl = (uWebSocketsRequest: HttpRequest, baseUrl: string | undefined = undefined): string => {
   const query = uWebSocketsRequest.getQuery();
   const pathAndQuery = uWebSocketsRequest.getUrl() + (query ? `?${query}` : '');
 
-  if (baseUrl) {
-    return `${baseUrl}${pathAndQuery}`;
+  // only origin-form request targets can be safely appended after a host: absolute-form
+  // ('http://evil.com/path'), authority-form and asterisk-form targets would end up within
+  // the authority part of the built url and allow host spoofing
+  if (!pathAndQuery.startsWith('/')) {
+    throw new Error(`Unsupported request target "${pathAndQuery}": only origin-form (starting with "/") is supported`);
   }
 
-  return `http://127.0.0.1${pathAndQuery}`;
+  return resolveUrl(pathAndQuery, baseUrl ?? 'http://127.0.0.1');
 };
 
 const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest): Array<[string, string]> => {
