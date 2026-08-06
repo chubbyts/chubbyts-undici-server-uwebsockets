@@ -4,6 +4,44 @@ import type { HttpRequest, HttpResponse } from 'uWebSockets.js';
 import type { Response } from '@chubbyts/chubbyts-undici-server/dist/server';
 import { ServerRequest } from '@chubbyts/chubbyts-undici-server/dist/server';
 
+type AbortState = { aborted: boolean; listeners: Array<() => void> };
+
+const abortStates = new WeakMap<HttpResponse, AbortState>();
+
+// uWebSockets.js supports only a single onAborted callback per response, but the request
+// factory and the response emitter both need to observe the abort: register it once and
+// fan out to all interested listeners
+const getAbortState = (uWebSocketsResponse: HttpResponse): AbortState => {
+  const existingState = abortStates.get(uWebSocketsResponse);
+
+  if (existingState) {
+    return existingState;
+  }
+
+  const state: AbortState = { aborted: false, listeners: [] };
+
+  abortStates.set(uWebSocketsResponse, state);
+
+  uWebSocketsResponse.onAborted(() => {
+    // oxlint-disable-next-line functional/immutable-data
+    state.aborted = true;
+    state.listeners.forEach((listener) => listener());
+  });
+
+  return state;
+};
+
+const addAbortListener = (state: AbortState, listener: () => void): void => {
+  if (state.aborted) {
+    listener();
+
+    return;
+  }
+
+  // oxlint-disable-next-line functional/immutable-data
+  state.listeners.push(listener);
+};
+
 export const getUrl = (uWebSocketsRequest: HttpRequest, baseUrl: string | undefined = undefined): string => {
   const query = uWebSocketsRequest.getQuery();
   const pathAndQuery = uWebSocketsRequest.getUrl() + (query ? `?${query}` : '');
@@ -26,10 +64,16 @@ const uWebSocketsRequestToUndiciHeadersInit = (uWebSocketsRequest: HttpRequest):
   return headers;
 };
 
-const getBody = (res: HttpResponse): ReadableStream => {
+const getBody = (uWebSocketsResponse: HttpResponse, abortState: AbortState): ReadableStream => {
   const passthrough = new PassThrough();
 
-  res.onData((chunk: ArrayBuffer, isLast: boolean) => {
+  // a disconnecting client would otherwise leave the passthrough open forever: a pending
+  // read of the request body has to fail instead of hanging
+  addAbortListener(abortState, () => {
+    passthrough.destroy(new Error('Request has been aborted'));
+  });
+
+  uWebSocketsResponse.onData((chunk: ArrayBuffer, isLast: boolean) => {
     passthrough.write(Buffer.from(new Uint8Array(chunk)));
 
     if (isLast) {
@@ -51,21 +95,29 @@ export const createUWebSocketsRequestToUndiciRequestFactory = (
   return (uWebSocketsRequest: HttpRequest, uWebSocketsResponse: HttpResponse): ServerRequest => {
     const method = uWebSocketsRequest.getMethod().toUpperCase();
     const headers = uWebSocketsRequestToUndiciHeadersInit(uWebSocketsRequest);
+    const url = getUrl(uWebSocketsRequest, baseUrl);
 
-    const hasBody = method !== 'GET' && method !== 'HEAD';
-    const body = hasBody ? getBody(uWebSocketsResponse) : null;
+    const abortState = getAbortState(uWebSocketsResponse);
 
     const abortController = new AbortController();
 
-    uWebSocketsResponse.onAborted(() => {
+    addAbortListener(abortState, () => {
       abortController.abort();
     });
 
-    return new ServerRequest(getUrl(uWebSocketsRequest, baseUrl), {
+    if (method === 'GET' || method === 'HEAD') {
+      return new ServerRequest(url, {
+        method,
+        headers,
+        signal: abortController.signal,
+      });
+    }
+
+    return new ServerRequest(url, {
       method,
       headers,
-      body,
-      duplex: hasBody ? 'half' : undefined,
+      body: getBody(uWebSocketsResponse, abortState),
+      duplex: 'half',
       signal: abortController.signal,
     });
   };
@@ -93,40 +145,68 @@ type UndiciResponseToUWebSocketsResponseEmitter = (undiciResponse: Response, uWe
 
 export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciResponseToUWebSocketsResponseEmitter => {
   return (undiciResponse: Response, uWebSocketsResponse: HttpResponse): void => {
-    uWebSocketsResponse.cork(() => {
-      uWebSocketsResponse.writeStatus(`${undiciResponse.status} ${undiciResponse.statusText}`);
+    const abortState = getAbortState(uWebSocketsResponse);
 
-      undiciResponseToUWebSocketsHeaders(undiciResponse).forEach(([name, value]) => {
-        uWebSocketsResponse.writeHeader(name, value);
-      });
-    });
+    const headers = undiciResponseToUWebSocketsHeaders(undiciResponse);
 
     if (!undiciResponse.body) {
       uWebSocketsResponse.cork(() => {
+        uWebSocketsResponse.writeStatus(`${undiciResponse.status} ${undiciResponse.statusText}`);
+
+        headers.forEach(([name, value]) => {
+          uWebSocketsResponse.writeHeader(name, value);
+        });
+
         uWebSocketsResponse.end();
       });
 
       return;
     }
 
-    const body = Readable.fromWeb(undiciResponse.body);
+    uWebSocketsResponse.cork(() => {
+      uWebSocketsResponse.writeStatus(`${undiciResponse.status} ${undiciResponse.statusText}`);
 
-    body.on('data', (data) => {
-      uWebSocketsResponse.cork(() => {
-        uWebSocketsResponse.write(data);
+      headers.forEach(([name, value]) => {
+        uWebSocketsResponse.writeHeader(name, value);
       });
     });
 
-    body.on('error', () =>
-      uWebSocketsResponse.cork(() => {
-        uWebSocketsResponse.end();
-      }),
-    );
+    const body = Readable.fromWeb(undiciResponse.body);
 
-    body.on('end', () =>
+    // a disconnecting client must stop the streaming: destroying the body stream also cancels
+    // the underlying web stream
+    addAbortListener(abortState, () => {
+      body.destroy(new Error('Response has been aborted'));
+    });
+
+    body.on('data', (data: Buffer) => {
+      uWebSocketsResponse.cork(() => {
+        // write returns false on backpressure: pause the body stream until the client is
+        // able to receive more data
+        if (!uWebSocketsResponse.write(data)) {
+          body.pause();
+
+          uWebSocketsResponse.onWritable(() => {
+            body.resume();
+
+            return true;
+          });
+        }
+      });
+    });
+
+    // an already started response cannot signal a failure anymore: close the connection
+    // instead of ending the response as if it was complete
+    body.on('error', () => {
+      if (!abortState.aborted) {
+        uWebSocketsResponse.close();
+      }
+    });
+
+    body.on('end', () => {
       uWebSocketsResponse.cork(() => {
         uWebSocketsResponse.end();
-      }),
-    );
+      });
+    });
   };
 };

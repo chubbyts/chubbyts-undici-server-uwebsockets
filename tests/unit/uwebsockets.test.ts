@@ -16,37 +16,86 @@ const mockUWebSocketsRequest = ({
   method: string;
   url: string;
   query: string;
-  headers: Record<string, string>;
+  headers: Array<[string, string]>;
 }) => {
   return {
     getMethod: () => method,
     getUrl: () => url,
     getQuery: () => query,
     forEach: (callback) => {
-      Object.entries(headers).forEach(([name, value]) => callback(name, value));
+      headers.forEach(([name, value]) => callback(name, value));
     },
   } as HttpRequest;
 };
 
 const makeErroringWebStream = (): ReadableStream<Uint8Array> => {
-  // oxlint-disable-next-line functional/no-let
-  let sent = false;
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(new TextEncoder().encode('hello'));
       setTimeout(() => {
-        if (!sent) {
-          sent = true;
-          controller.error(new Error('boom'));
-        }
+        controller.error(new Error('boom'));
       }, 1);
     },
   });
 };
 
-const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: string; abort?: boolean }) => {
-  return {
-    onData: (callback) => {
+const makeStallingWebStream = (onCancel?: (reason: unknown) => void): ReadableStream<Uint8Array> => {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('partial'));
+      // stays open: never closes and never enqueues again
+    },
+    cancel(reason) {
+      onCancel?.(reason);
+    },
+  });
+};
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+type MockUWebSocketsResponse = HttpResponse & {
+  status: string | undefined;
+  headers: Array<[string, string]>;
+  chunks: Array<string>;
+  ended: boolean;
+  closed: boolean;
+  triggerAbort: () => void;
+  triggerData: (chunk: string, isLast: boolean) => void;
+  triggerWritable: () => boolean;
+};
+
+const mockUWebSocketsResponse = (
+  options: {
+    body?: string;
+    stallBody?: boolean;
+    abort?: boolean;
+    writeReturnValues?: Array<boolean>;
+  } = {},
+): MockUWebSocketsResponse => {
+  const { body, stallBody = false, abort = false, writeReturnValues = [] } = options;
+
+  // oxlint-disable-next-line functional/no-let
+  let onAbortedCallback: (() => void) | undefined;
+
+  // oxlint-disable-next-line functional/no-let
+  let onDataCallback: ((chunk: ArrayBuffer, isLast: boolean) => void) | undefined;
+
+  // oxlint-disable-next-line functional/no-let
+  let onWritableCallback: ((offset: number) => boolean) | undefined;
+
+  const response = {
+    status: undefined as string | undefined,
+    headers: [] as Array<[string, string]>,
+    chunks: [] as Array<string>,
+    ended: false,
+    closed: false,
+    onData: (callback: (chunk: ArrayBuffer, isLast: boolean) => void) => {
+      onDataCallback = callback;
+
+      if (stallBody) {
+        return;
+      }
+
       if (undefined === body) {
         throw new Error('no body');
       }
@@ -65,7 +114,7 @@ const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: s
 
         isLast = end === bodyLength;
 
-        callback(new TextEncoder().encode(body.substring(start, end)).buffer, isLast);
+        callback(new TextEncoder().encode(body.substring(start, end)).buffer as ArrayBuffer, isLast);
 
         if (isLast) {
           return;
@@ -74,12 +123,54 @@ const mockUWebSocketsResponse = ({ body = undefined, abort = false }: { body?: s
         start = end;
       }
     },
-    onAborted: (callback) => {
+    onAborted: (callback: () => void) => {
+      onAbortedCallback = callback;
+
       if (abort) {
         callback();
       }
     },
-  } as HttpResponse;
+    onWritable: (callback: (offset: number) => boolean) => {
+      onWritableCallback = callback;
+    },
+    cork: (callback: () => void) => {
+      callback();
+    },
+    writeStatus: (status: string) => {
+      // oxlint-disable-next-line functional/immutable-data
+      response.status = status;
+    },
+    writeHeader: (name: string, value: string) => {
+      // oxlint-disable-next-line functional/immutable-data
+      response.headers.push([name, value]);
+    },
+    write: (chunk: Buffer) => {
+      // oxlint-disable-next-line functional/immutable-data
+      response.chunks.push(chunk.toString());
+
+      // oxlint-disable-next-line functional/immutable-data
+      return writeReturnValues.length > 0 ? (writeReturnValues.shift() as boolean) : true;
+    },
+    end: () => {
+      // oxlint-disable-next-line functional/immutable-data
+      response.ended = true;
+    },
+    close: () => {
+      // oxlint-disable-next-line functional/immutable-data
+      response.closed = true;
+
+      onAbortedCallback?.();
+    },
+    triggerAbort: () => {
+      onAbortedCallback?.();
+    },
+    triggerData: (chunk: string, isLast: boolean) => {
+      onDataCallback?.(new TextEncoder().encode(chunk).buffer as ArrayBuffer, isLast);
+    },
+    triggerWritable: () => onWritableCallback?.(0) ?? false,
+  };
+
+  return response as unknown as MockUWebSocketsResponse;
 };
 
 describe('uwebsockets', () => {
@@ -129,9 +220,7 @@ describe('uwebsockets', () => {
         method: 'get',
         url: '/path/to/endpoint',
         query: 'key=value',
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: [['accept', 'application/json']],
       });
 
       const uWebSocketsResponse = mockUWebSocketsResponse({ abort: true });
@@ -159,9 +248,7 @@ describe('uwebsockets', () => {
         method: 'head',
         url: '/path/to/endpoint',
         query: 'key=value',
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: [['accept', 'application/json']],
       });
 
       const uWebSocketsResponse = mockUWebSocketsResponse({});
@@ -189,10 +276,10 @@ describe('uwebsockets', () => {
         method: 'post',
         url: '/path/to/endpoint',
         query: 'key=value',
-        headers: {
-          'content-type': 'multipart/form-data; boundary=WebKitFormBoundary7MA4YWxkTrZu0gW',
-          Accept: 'application/json',
-        },
+        headers: [
+          ['content-type', 'multipart/form-data; boundary=WebKitFormBoundary7MA4YWxkTrZu0gW'],
+          ['accept', 'application/json'],
+        ],
       });
 
       const uWebSocketsResponse = mockUWebSocketsResponse({
@@ -246,6 +333,28 @@ describe('uwebsockets', () => {
       expect((fileField as File).name).toBe('red.png');
       expect((fileField as File).size).toBe(69);
     });
+
+    test('post, with abort while receiving the body', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'post',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ stallBody: true });
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      uWebSocketsResponse.triggerAbort();
+
+      expect(serverRequest.signal.aborted).toBe(true);
+
+      await expect(serverRequest.text()).rejects.toThrow('Request has been aborted');
+    });
   });
 
   describe('createUndiciResponseToUWebSocketsResponseEmitter', () => {
@@ -261,37 +370,14 @@ describe('uwebsockets', () => {
         ],
       });
 
-      // oxlint-disable-next-line functional/no-let
-      let status;
-
-      // oxlint-disable-next-line functional/no-let, prefer-const
-      let headers: Array<[string, string]> = [];
-
-      // oxlint-disable-next-line functional/no-let
-      let end = false;
-
-      const uWebSocketsResponse = {
-        cork: (callback) => {
-          callback();
-        },
-        end: () => {
-          end = true;
-        },
-        writeStatus: (_status: string) => {
-          status = _status;
-        },
-        writeHeader: (key: string, value: string) => {
-          // oxlint-disable-next-line functional/immutable-data
-          headers.push([key, value]);
-        },
-      } as HttpResponse;
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
 
       const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
 
       undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
 
-      expect(status).toBe('201 Created');
-      expect(headers).toMatchInlineSnapshot(`
+      expect(uWebSocketsResponse.status).toBe('201 Created');
+      expect(uWebSocketsResponse.headers).toMatchInlineSnapshot(`
         [
           [
             "x-custom",
@@ -308,7 +394,7 @@ describe('uwebsockets', () => {
         ]
       `);
 
-      expect(end).toBe(true);
+      expect(uWebSocketsResponse.ended).toBe(true);
     });
 
     test('with body', async () => {
@@ -318,43 +404,14 @@ describe('uwebsockets', () => {
         headers: [['content-type', 'json']],
       });
 
-      // oxlint-disable-next-line functional/no-let
-      let status;
-
-      // oxlint-disable-next-line functional/no-let, prefer-const
-      let headers: Array<[string, string]> = [];
-
-      // oxlint-disable-next-line functional/no-let
-      let end = false;
-
-      // oxlint-disable-next-line functional/no-let
-      let body = '';
-
-      const uWebSocketsResponse = {
-        cork: (callback) => {
-          callback();
-        },
-        end: () => {
-          end = true;
-        },
-        writeStatus: (_status: string) => {
-          status = _status;
-        },
-        writeHeader: (key: string, value: string) => {
-          // oxlint-disable-next-line functional/immutable-data
-          headers.push([key, value]);
-        },
-        write: (content) => {
-          body += content;
-        },
-      } as HttpResponse;
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
 
       const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
 
       undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
 
-      expect(status).toBe('200 OK');
-      expect(headers).toMatchInlineSnapshot(`
+      expect(uWebSocketsResponse.status).toBe('200 OK');
+      expect(uWebSocketsResponse.headers).toMatchInlineSnapshot(`
         [
           [
             "content-type",
@@ -363,14 +420,46 @@ describe('uwebsockets', () => {
         ]
       `);
 
-      await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          resolve();
-        }, 1);
+      await wait(1);
+
+      expect(uWebSocketsResponse.ended).toBe(true);
+      expect(uWebSocketsResponse.chunks.join('')).toMatchInlineSnapshot('"{"name":"test"}"');
+      expect(uWebSocketsResponse.closed).toBe(false);
+    });
+
+    test('with body, with backpressure', async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('chunk1'));
+          controller.enqueue(new TextEncoder().encode('chunk2'));
+          controller.close();
+        },
       });
 
-      expect(end).toBe(true);
-      expect(body).toMatchInlineSnapshot('"{"name":"test"}"');
+      const undiciResponse = new Response(body, {
+        status: 200,
+        statusText: 'OK',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ writeReturnValues: [false, true] });
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      await wait(10);
+
+      // the first write signaled backpressure: the body stream is paused until the client is writable again
+      expect(uWebSocketsResponse.chunks).toEqual(['chunk1']);
+      expect(uWebSocketsResponse.ended).toBe(false);
+
+      expect(uWebSocketsResponse.triggerWritable()).toBe(true);
+
+      await wait(10);
+
+      expect(uWebSocketsResponse.chunks).toEqual(['chunk1', 'chunk2']);
+      expect(uWebSocketsResponse.ended).toBe(true);
     });
 
     test('with body containing an error', async () => {
@@ -380,43 +469,14 @@ describe('uwebsockets', () => {
         headers: [['content-type', 'json']],
       });
 
-      // oxlint-disable-next-line functional/no-let
-      let status;
-
-      // oxlint-disable-next-line functional/no-let, prefer-const
-      let headers: Array<[string, string]> = [];
-
-      // oxlint-disable-next-line functional/no-let
-      let end = false;
-
-      // oxlint-disable-next-line functional/no-let
-      let body = '';
-
-      const uWebSocketsResponse = {
-        cork: (callback) => {
-          callback();
-        },
-        end: () => {
-          end = true;
-        },
-        writeStatus: (_status: string) => {
-          status = _status;
-        },
-        writeHeader: (key: string, value: string) => {
-          // oxlint-disable-next-line functional/immutable-data
-          headers.push([key, value]);
-        },
-        write: (content) => {
-          body += content;
-        },
-      } as HttpResponse;
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
 
       const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
 
       undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
 
-      expect(status).toBe('200 OK');
-      expect(headers).toMatchInlineSnapshot(`
+      expect(uWebSocketsResponse.status).toBe('200 OK');
+      expect(uWebSocketsResponse.headers).toMatchInlineSnapshot(`
         [
           [
             "content-type",
@@ -425,14 +485,89 @@ describe('uwebsockets', () => {
         ]
       `);
 
-      await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          resolve();
-        }, 2);
+      await wait(10);
+
+      // an already started response cannot signal a failure: the connection gets closed
+      // instead of ending the response as if it was complete
+      expect(uWebSocketsResponse.chunks.join('')).toMatchInlineSnapshot('"hello"');
+      expect(uWebSocketsResponse.ended).toBe(false);
+      expect(uWebSocketsResponse.closed).toBe(true);
+    });
+
+    test('with body, with abort while sending the body', async () => {
+      // oxlint-disable-next-line functional/no-let
+      let cancelReason: unknown;
+
+      const undiciResponse = new Response(
+        makeStallingWebStream((reason) => {
+          cancelReason = reason;
+        }),
+        {
+          status: 200,
+          statusText: 'OK',
+          headers: [['content-type', 'text/plain']],
+        },
+      );
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      await wait(10);
+
+      expect(uWebSocketsResponse.chunks.join('')).toBe('partial');
+
+      uWebSocketsResponse.triggerAbort();
+
+      await wait(10);
+
+      // the client is gone: the streaming stopped without ending or closing the response
+      // and the underlying web stream got cancelled
+      expect(uWebSocketsResponse.ended).toBe(false);
+      expect(uWebSocketsResponse.closed).toBe(false);
+      expect((cancelReason as Error).message).toBe('Response has been aborted');
+    });
+
+    test('with body, with abort, with request factory sharing the same response', async () => {
+      const uWebSocketsRequest = mockUWebSocketsRequest({
+        method: 'get',
+        url: '/path/to/endpoint',
+        query: '',
+        headers: [],
       });
 
-      expect(end).toBe(true);
-      expect(body).toMatchInlineSnapshot('"hello"');
+      const uWebSocketsResponse = mockUWebSocketsResponse({});
+
+      const uWebSocketsRequestToUndiciRequestFactory =
+        createUWebSocketsRequestToUndiciRequestFactory('https://example.com');
+
+      const serverRequest = uWebSocketsRequestToUndiciRequestFactory(uWebSocketsRequest, uWebSocketsResponse);
+
+      const undiciResponse = new Response(makeStallingWebStream(), {
+        status: 200,
+        statusText: 'OK',
+        headers: [['content-type', 'text/plain']],
+      });
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      await wait(10);
+
+      expect(uWebSocketsResponse.chunks.join('')).toBe('partial');
+
+      uWebSocketsResponse.triggerAbort();
+
+      await wait(10);
+
+      // the single uWebSockets.js onAborted callback fans out to both the request factory
+      // (abort signal) and the response emitter (stopped streaming)
+      expect(serverRequest.signal.aborted).toBe(true);
+      expect(uWebSocketsResponse.ended).toBe(false);
+      expect(uWebSocketsResponse.closed).toBe(false);
     });
   });
 });
