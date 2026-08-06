@@ -600,6 +600,43 @@ describe('uwebsockets', () => {
       expect(uWebSocketsResponse.closed).toBe(true);
     });
 
+    test('with body, with already aborted response', async () => {
+      const undiciResponse = new Response(JSON.stringify({ name: 'test' }), {
+        status: 200,
+        statusText: 'OK',
+        headers: [['content-type', 'json']],
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ abort: true });
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      expect(uWebSocketsResponse.status).toBeUndefined();
+      expect(uWebSocketsResponse.headers).toEqual([]);
+      expect(uWebSocketsResponse.ended).toBe(false);
+
+      // the potentially connection-backed body got cancelled
+      expect(undiciResponse.bodyUsed).toBe(true);
+    });
+
+    test('without body, with already aborted response', async () => {
+      const undiciResponse = new Response(null, {
+        status: 204,
+        statusText: 'No Content',
+      });
+
+      const uWebSocketsResponse = mockUWebSocketsResponse({ abort: true });
+
+      const undiciResponseToUWebSocketsResponseEmitter = createUndiciResponseToUWebSocketsResponseEmitter();
+
+      undiciResponseToUWebSocketsResponseEmitter(undiciResponse, uWebSocketsResponse);
+
+      expect(uWebSocketsResponse.status).toBeUndefined();
+      expect(uWebSocketsResponse.ended).toBe(false);
+    });
+
     test('with body, with abort while sending the body', async () => {
       // oxlint-disable-next-line functional/no-let
       let cancelReason: unknown;

@@ -165,6 +165,14 @@ export const createUndiciResponseToUWebSocketsResponseEmitter = (): UndiciRespon
   return (undiciResponse: Response, uWebSocketsResponse: HttpResponse): void => {
     const abortState = getAbortState(uWebSocketsResponse);
 
+    // the client may already be gone (uWebSockets.js forbids touching an aborted response):
+    // cancel the potentially connection-backed body, nothing can be sent to the client anymore
+    if (abortState.aborted) {
+      undiciResponse.body?.cancel().catch(() => {});
+
+      return;
+    }
+
     const headers = undiciResponseToUWebSocketsHeaders(undiciResponse);
 
     if (!undiciResponse.body) {
